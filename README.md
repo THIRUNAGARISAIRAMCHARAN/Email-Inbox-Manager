@@ -1,3 +1,13 @@
+---
+title: Email Inbox Manager
+emoji: 📧
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+tags:
+  - openenv
+---
 # Email Inbox Manager (OpenEnv)
 
 ## 1. Overview
