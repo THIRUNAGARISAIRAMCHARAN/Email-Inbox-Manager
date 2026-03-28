@@ -43,6 +43,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Wildcard origins require allow_credentials=False (browser / Starlette reject credentials + "*").
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
