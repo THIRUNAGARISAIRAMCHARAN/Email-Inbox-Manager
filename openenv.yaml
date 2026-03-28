@@ -1,0 +1,201 @@
+# OpenEnv manifest — Email Inbox Manager
+# Python types: email_env.models.Observation, Action, InboxState, ResetResponse, StepResult
+
+name: email-inbox-manager
+version: "1.0.0"
+description: >-
+  AI agent manages a simulated email inbox: read, reply, compose, label, delete, and search
+  over synthetic threads and triage workloads. Episodes expose typed observations and
+  discriminated actions over a FastAPI HTTP API.
+
+tags:
+  - openenv
+  - email
+  - productivity
+  - real-world
+
+api:
+  base_url: http://localhost:7860
+  endpoints:
+    reset:
+      method: POST
+      path: /reset
+      body: { task_id: string, seed: integer }
+    step:
+      method: POST
+      path: /step
+      body: { session_id: string, action: Action }
+    state:
+      method: GET
+      path: /state/{session_id}
+    tasks:
+      method: GET
+      path: /tasks
+    health:
+      method: GET
+      path: /health
+
+schemas:
+  observation: email_env.models.Observation
+  action: email_env.models.Action
+  state: email_env.models.InboxState
+  reset_response: email_env.models.ResetResponse
+  step_result: email_env.models.StepResult
+
+observation_space:
+  description: Agent-visible payload after reset or embedded in StepResult.observation (see email_env.models.Observation).
+  fields:
+    task_id:
+      type: string
+      description: Current task identifier (same as selected task family for the episode).
+    task_type:
+      type: string
+      description: Same as task_id in this environment; mirrors task registry key.
+    prompt:
+      type: string
+      description: Natural-language instruction for the agent (from TaskConfig.desc).
+    inbox_snapshot:
+      type: array
+      item_schema: EmailMessage
+      description: >-
+        Messages visible in the current inbox view. After a search step, may be filtered to
+        hit messages only for that transition; otherwise full active inbox.
+    focus_message_id:
+      type: string
+      nullable: true
+      description: Message id the task emphasizes when present (typically newest or primary triage target).
+    done:
+      type: boolean
+      description: Whether the episode has terminated (max steps or holistic score reached 1.0).
+    reward:
+      type: number
+      nullable: true
+      description: Reward signal attached to this observation transition when applicable (often step delta context).
+    step_count:
+      type: integer
+      minimum: 0
+      description: Number of environment steps taken so far in this episode.
+    schema_version:
+      type: string
+      description: Observation JSON schema revision (default "1").
+    available_action_types:
+      type: array
+      items: { type: string }
+      description: Discriminator strings for Action union (read_email, reply, compose, label, delete, search, noop).
+    standard_folders:
+      type: array
+      items: { type: string }
+      description: Folder names valid for triage (e.g. inbox, updates, finance, social).
+    info:
+      type: object
+      description: >-
+        Diagnostics only (step_count, max_steps, cumulative_reward, session_id, holistic_score,
+        search hits, etc.). Must not contain private grader gold.
+
+  EmailMessage:
+    description: One message inside inbox_snapshot (email_env.models.EmailMessage).
+    fields:
+      message_id: { type: string, description: Stable unique id. }
+      subject: { type: string, description: Subject line. }
+      body: { type: string, description: Plain-text body. }
+      from_address: { type: string, description: Simulated From address. }
+      to_addresses: { type: array, items: { type: string }, description: Primary recipients. }
+      cc_addresses: { type: array, items: { type: string }, description: CC recipients. }
+      bcc_addresses: { type: array, items: { type: string }, description: BCC recipients. }
+      date_sent: { type: string, format: date-time, description: Sent timestamp (UTC). }
+      read: { type: boolean, description: Whether the message has been marked read. }
+      thread_id: { type: string, nullable: true, description: Conversation/thread id if threaded. }
+      in_reply_to: { type: string, nullable: true, description: Parent message_id if a reply. }
+      folder: { type: string, description: Current folder / triage bucket. }
+      importance: { type: string, enum: [low, normal, high], description: Importance hint. }
+      has_attachments: { type: boolean, description: Attachment metadata flag. }
+      snippet: { type: string, nullable: true, description: Short preview text (often derived from body). }
+      metadata: { type: object, description: Synthetic hints (topic, category, needs_reply, etc.). }
+
+action_space:
+  description: >-
+    Discriminated union on field action_type (Pydantic Field discriminator). JSON must include
+    action_type and fields for the chosen variant (email_env.models.Action).
+  types:
+    read_email:
+      discriminator: read_email
+      fields:
+        action_type: { const: read_email }
+        message_id: { type: string, description: Message to open. }
+        mark_read: { type: boolean, default: true, description: If true, mark unread as read. }
+    reply:
+      discriminator: reply
+      fields:
+        action_type: { const: reply }
+        message_id: { type: string, description: Message being replied to. }
+        body: { type: string, description: Reply body (plain text). }
+        reply_all: { type: boolean, default: false }
+        cc_addresses: { type: array, items: { type: string }, default: [] }
+    compose:
+      discriminator: compose
+      fields:
+        action_type: { const: compose }
+        draft_id: { type: string, nullable: true, description: Optional draft id for updates. }
+        to_addresses: { type: array, items: { type: string }, default: [] }
+        cc_addresses: { type: array, items: { type: string }, default: [] }
+        bcc_addresses: { type: array, items: { type: string }, default: [] }
+        subject: { type: string, default: "", description: Outbound subject. }
+        body: { type: string, default: "", description: Outbound body. }
+    label:
+      discriminator: label
+      fields:
+        action_type: { const: label }
+        message_id: { type: string }
+        labels: { type: array, items: { type: string }, description: Folder or label names. }
+        replace_existing: { type: boolean, default: true }
+    delete:
+      discriminator: delete
+      fields:
+        action_type: { const: delete }
+        message_id: { type: string }
+        permanent: { type: boolean, default: false, description: Soft-delete vs purge hint. }
+    search:
+      discriminator: search
+      fields:
+        action_type: { const: search }
+        query: { type: string, description: Substring search over subject, body, from. }
+        folder_scope: { type: string, nullable: true, description: Restrict search to folder. }
+        limit: { type: integer, minimum: 1, maximum: 500, default: 20 }
+    noop:
+      discriminator: noop
+      fields:
+        action_type: { const: noop }
+        reason: { type: string, nullable: true, description: Optional debug note. }
+
+tasks:
+  - id: easy_reply
+    name: Boss urgent reply
+    difficulty: easy
+    max_steps: 10
+    score_range: [0.0, 1.0]
+  - id: medium_triage
+    name: Inbox triage
+    difficulty: medium
+    max_steps: 20
+    score_range: [0.0, 1.0]
+  - id: hard_thread
+    name: Q4 budget thread
+    difficulty: hard
+    max_steps: 30
+    score_range: [0.0, 1.0]
+
+reward:
+  type: continuous
+  range: [0.0, 1.0]
+  description: >-
+    Partial credit for progress. Dense signal each step: holistic task score in [0, 1] is
+    exposed and step reward is the change from the previous score. Episode terminates when
+    the holistic score reaches 1.0 or the step budget is exhausted.
+
+docker:
+  image: email-inbox-manager
+  port: 7860
+
+runtime:
+  python: "3.11"
+  entrypoint: "uvicorn main:app --host 0.0.0.0 --port 7860"
