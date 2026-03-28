@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from email_env.env import EmailEnv
 from email_env.models import Action, InboxState, ResetResponse, StepResult
-from email_env.tasks import TASK_REGISTRY, TaskConfig, get_task_config
+from email_env.tasks import TASK_REGISTRY, TaskConfig
 
 # Process-local session table: session_id -> EmailEnv
 SESSION_STORE: dict[str, EmailEnv] = {}
@@ -55,8 +55,21 @@ app.add_middleware(
 class ResetBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    task_id: str = Field(description="Task id from TASK_REGISTRY (e.g. easy_reply).")
+    task_id: str = Field(
+        default="easy_reply",
+        description="Task id from TASK_REGISTRY (e.g. easy_reply). Unknown ids fall back to easy_reply.",
+    )
+    task_type: str | None = Field(
+        default=None,
+        description="Alias for task_id (OpenEnv compatibility); if set, overrides task_id.",
+    )
     seed: int = Field(default=42, description="PRNG seed for synthetic inbox generation.")
+
+    def effective_task_id(self) -> str:
+        if self.task_type is not None and str(self.task_type).strip() != "":
+            return str(self.task_type).strip()
+        tid = str(self.task_id).strip()
+        return tid if tid else "easy_reply"
 
 
 class StepBody(BaseModel):
@@ -66,6 +79,11 @@ class StepBody(BaseModel):
     action: Action
 
 
+@app.get("/")
+def root():
+    return {"name": "email-inbox-manager", "status": "ok", "version": "1.0.0"}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "env": "email-inbox-manager"}
@@ -73,16 +91,12 @@ def health():
 
 @app.post("/reset", response_model=ResetResponse)
 def reset_episode(body: ResetBody):
-    try:
-        get_task_config(body.task_id)
-    except KeyError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown task_id {body.task_id!r}; valid: {sorted(TASK_REGISTRY)}",
-        ) from None
+    task_id = body.effective_task_id()
+    if task_id not in TASK_REGISTRY:
+        task_id = "easy_reply"
 
     session_id = uuid.uuid4().hex
-    env = EmailEnv(task_id=body.task_id, session_id=session_id, seed=body.seed)
+    env = EmailEnv(task_id=task_id, session_id=session_id, seed=body.seed)
 
     with _MAP_LOCK:
         SESSION_STORE[session_id] = env
