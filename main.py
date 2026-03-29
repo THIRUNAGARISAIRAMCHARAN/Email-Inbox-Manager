@@ -10,7 +10,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,17 +54,13 @@ app.add_middleware(
 
 
 class ResetBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """All fields optional for OpenEnv validators that POST /reset with no JSON body."""
 
-    task_id: str = Field(
-        default="easy_reply",
-        description="Task id from TASK_REGISTRY (e.g. easy_reply). Unknown ids fall back to easy_reply.",
-    )
-    task_type: str | None = Field(
-        default=None,
-        description="Alias for task_id (OpenEnv compatibility); if set, overrides task_id.",
-    )
-    seed: int = Field(default=42, description="PRNG seed for synthetic inbox generation.")
+    model_config = ConfigDict(extra="ignore")
+
+    task_id: str = "easy_reply"
+    seed: int = 42
+    task_type: str | None = None
 
     def effective_task_id(self) -> str:
         if self.task_type is not None and str(self.task_type).strip() != "":
@@ -91,7 +87,7 @@ def health():
 
 
 @app.post("/reset", response_model=ResetResponse)
-def reset_episode(body: ResetBody):
+async def reset_episode(body: ResetBody = Body(default=ResetBody())):
     task_id = body.effective_task_id()
     if task_id not in TASK_REGISTRY:
         task_id = "easy_reply"
