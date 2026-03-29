@@ -7,6 +7,10 @@ name = "email-inbox-manager"
 version = "1.0.0"
 description = "Email Inbox Manager OpenEnv environment"
 requires-python = ">=3.11"
+dependencies = ["openenv-core>=0.2.0"]
+
+[project.scripts]
+server = "main:app"
 
 [tool.openenv]
 name = "email-inbox-manager"
