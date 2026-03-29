@@ -22,7 +22,9 @@ USER app
 
 EXPOSE 7860
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+# Longer start_period: cold start + import graph on small HF runners before health probes pass.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
     CMD curl -fSs http://localhost:7860/health >/dev/null || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+# HF sets PORT in some runtimes; default keeps local/docker-compose behavior.
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}"]
