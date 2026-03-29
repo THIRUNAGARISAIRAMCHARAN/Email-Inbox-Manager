@@ -6,15 +6,13 @@ Run: ``uvicorn main:app --host 0.0.0.0 --port 7860``
 
 from __future__ import annotations
 
-import json
 import threading
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.requests import Request
 
 from email_env.env import EmailEnv
 from email_env.models import Action, InboxState, ResetResponse, StepResult
@@ -73,28 +71,6 @@ class ResetBody(BaseModel):
         return tid if tid else "easy_reply"
 
 
-async def _coerce_reset_body(request: Request) -> ResetBody:
-    """
-    Accept missing body, empty body, literal JSON ``null``, or any malformed JSON
-    (OpenEnv / Hugging Face validators vary: no Content-Type, zero-length, etc.).
-    """
-    raw = await request.body()
-    if not raw.strip():
-        return ResetBody()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return ResetBody()
-    if data is None:
-        return ResetBody()
-    if not isinstance(data, dict):
-        return ResetBody()
-    try:
-        return ResetBody.model_validate(data)
-    except Exception:
-        return ResetBody()
-
-
 class StepBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -114,8 +90,12 @@ def health():
 
 @app.post("/reset", response_model=ResetResponse)
 @app.post("/reset/", response_model=ResetResponse, include_in_schema=False)
-async def reset_episode(request: Request):
-    body = await _coerce_reset_body(request)
+async def reset_episode(
+    payload: ResetBody | None = Body(default=None),
+):
+    # Optional body (not ``Request``-only): OpenAPI + HF validators treat the JSON body as
+    # optional — fixes 422 {"loc": ["body"], "msg": "Field required", "input": null}.
+    body = payload if payload is not None else ResetBody()
     task_id = body.effective_task_id()
     if task_id not in TASK_REGISTRY:
         task_id = "easy_reply"
